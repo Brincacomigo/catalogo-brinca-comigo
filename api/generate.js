@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import formidable from "formidable";
 import fs from "fs";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.js";
 
 export const config = { api: { bodyParser: false, responseLimit: false, maxDuration: 60 } };
 
@@ -18,12 +20,23 @@ function getMime(file) {
   return "image/jpeg";
 }
 
+// Mapeia tamanhos do catálogo para colunas da tabela
+function mapSizeToColumn(sizeStr) {
+  const s = sizeStr.toLowerCase().replace(/\s/g, "");
+  if (s.includes("1/2/3") || s.includes("1a3") || s === "1-3") return "1 a 3";
+  if (s.includes("4/6/8") || s.includes("4a8") || s === "4-8") return "4 a 8";
+  if (s.includes("p/m") || s.includes("pam") || s.includes("pagm")) return "P a M";
+  if (s.includes("p/m/g/gg") || s.includes("pagg") || s.includes("paggg")) return "P a GG";
+  if (s === "único" || s === "unico" || s === "un") return "ÚNICO";
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const form = formidable({ multiples: true });
+  const form = formidable({ multiples: true, maxFileSize: 20 * 1024 * 1024 });
   form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "Erro ao ler arquivos" });
+    if (err) return res.status(500).json({ error: "Erro ao ler arquivos: " + err.message });
 
     try {
       const markup = parseFloat(fields.markup?.[0] || fields.markup || "35");
@@ -32,12 +45,10 @@ export default async function handler(req, res) {
       const catalogFile = Array.isArray(files.catalog) ? files.catalog[0] : files.catalog;
       const priceFile = Array.isArray(files.price) ? files.price[0] : files.price;
 
-      const catB64 = toBase64(catalogFile.filepath);
-      const catMime = getMime(catalogFile);
       const priceB64 = toBase64(priceFile.filepath);
       const priceMime = getMime(priceFile);
 
-      // Lê tabela de preços
+      // 1. Lê tabela de preços com IA
       const priceRes = await client.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 4000,
@@ -50,7 +61,7 @@ export default async function handler(req, res) {
             },
             {
               type: "text",
-              text: `Extraia TODOS os produtos desta tabela de preços. Retorne SOMENTE JSON válido, sem texto extra, sem markdown. Formato: {"products":[{"code":"COD","name":"NOME","prices":{"P":10.00,"M":12.00,"G":14.00}}]}. Se o preço não variar por tamanho, use {"ÚNICO":valor}. Se não houver nome, use string vazia.`
+              text: `Extraia todos os produtos desta tabela de preços. As colunas de tamanho podem ser: "P a GG", "P a M", "1 a 3", "4 a 8", "ÚNICO". Retorne SOMENTE JSON válido sem markdown. Formato: {"products":[{"code":"62521","prices":{"1 a 3":74.90,"4 a 8":84.90}}]}`
             }
           ]
         }]
@@ -60,11 +71,12 @@ export default async function handler(req, res) {
       const priceTxt = priceRes.content.find(b => b.type === "text")?.text || "";
       const priceClean = priceTxt.replace(/```json|```/g, "").trim();
       const parsedPrices = JSON.parse(priceClean);
-      (parsedPrices.products || []).forEach(p => {
-        priceMap[p.code] = { name: p.name, prices: p.prices };
-      });
+      (parsedPrices.products || []).forEach(p => { priceMap[String(p.code)] = p.prices || {}; });
 
-      // Lê catálogo
+      // 2. Lê catálogo com IA para identificar produtos por página
+      const catB64 = toBase64(catalogFile.filepath);
+      const catMime = getMime(catalogFile);
+
       const catRes = await client.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 4000,
@@ -77,7 +89,7 @@ export default async function handler(req, res) {
             },
             {
               type: "text",
-              text: `Liste todos os produtos deste catálogo com suas imagens em base64 se possível. Retorne SOMENTE JSON válido, sem texto extra. Formato: {"brand":"NOME DA MARCA","products":[{"code":"COD","name":"NOME DO PRODUTO","imageBase64":"base64 da imagem ou vazio"}]}`
+              text: `Para cada produto neste catálogo, identifique: o código, os tamanhos disponíveis e em qual página está. Retorne SOMENTE JSON válido sem markdown. Formato: {"brand":"NOME","products":[{"code":"62521","sizes":["1/2/3","4/6/8"],"page":10}]}`
             }
           ]
         }]
@@ -87,22 +99,63 @@ export default async function handler(req, res) {
       const catClean = catTxt.replace(/```json|```/g, "").trim();
       const parsedCat = JSON.parse(catClean);
       const brand = parsedCat.brand || "";
-      const products = (parsedCat.products || []).map(p => {
-        const info = priceMap[p.code] || {};
-        const rawPrices = info.prices || {};
+      const products = parsedCat.products || [];
+
+      // 3. Monta lista de produtos com preços marcados
+      const result = products.map(p => {
+        const basePrice = priceMap[String(p.code)] || {};
         const markedPrices = {};
-        Object.entries(rawPrices).forEach(([tam, val]) => {
-          markedPrices[tam] = (parseFloat(val) * multiplier).toFixed(2);
+        (p.sizes || []).forEach(sz => {
+          const col = mapSizeToColumn(sz);
+          if (col && basePrice[col]) {
+            markedPrices[sz] = "R$ " + (parseFloat(basePrice[col]) * multiplier).toFixed(2).replace(".", ",");
+          }
         });
-        return {
-          code: p.code,
-          name: p.name || info.name || "",
-          prices: markedPrices,
-          imageBase64: p.imageBase64 || ""
-        };
+        // fallback: se não achou por tamanho, pega ÚNICO
+        if (Object.keys(markedPrices).length === 0 && basePrice["ÚNICO"]) {
+          markedPrices["ÚNICO"] = "R$ " + (parseFloat(basePrice["ÚNICO"]) * multiplier).toFixed(2).replace(".", ",");
+        }
+        return { code: p.code, sizes: p.sizes || [], prices: markedPrices, page: p.page };
       });
 
-      res.status(200).json({ brand, products, markup });
+      // 4. Abre o PDF original e carimba os preços
+      const pdfBytes = fs.readFileSync(catalogFile.filepath);
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const pages = pdfDoc.getPages();
+
+      for (const product of result) {
+        if (!product.prices || Object.keys(product.prices).length === 0) continue;
+        const pageIdx = (product.page || 1) - 1;
+        if (pageIdx < 0 || pageIdx >= pages.length) continue;
+        const page = pages[pageIdx];
+        const { width, height } = page.getSize();
+
+        // Procura posição do código na página para saber onde colocar o preço
+        // Como não temos coordenadas exatas, colocamos no rodapé da página agrupado por código
+        const priceText = Object.entries(product.prices)
+          .map(([sz, val]) => `${sz}: ${val}`)
+          .join("  |  ");
+
+        // Posição: parte inferior da página, empilhado por produto
+        const yPos = 40 + (result.filter(r => r.page === product.page).indexOf(product) * 18);
+
+        page.drawRectangle({
+          x: 10, y: yPos - 4, width: width - 20, height: 16,
+          color: rgb(1, 1, 1), opacity: 0.85,
+        });
+
+        page.drawText(`${product.code}  ${priceText}`, {
+          x: 14, y: yPos,
+          size: 9, font,
+          color: rgb(0.15, 0.15, 0.15),
+        });
+      }
+
+      const modifiedPdfBytes = await pdfDoc.save();
+      const modifiedB64 = Buffer.from(modifiedPdfBytes).toString("base64");
+
+      res.status(200).json({ brand, products: result, markup, pdfBase64: modifiedB64 });
 
     } catch (e) {
       res.status(500).json({ error: e.message });
