@@ -4,6 +4,8 @@
   "private": true,
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
-    "formidable": "^3.5.1"
+    "formidable": "^3.5.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174"
   }
 }
