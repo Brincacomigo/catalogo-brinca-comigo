@@ -30,9 +30,8 @@
   .error { background: #FEF2F2; border: 1px solid #FECACA; border-radius: 8px; padding: 10px 14px; color: #DC2626; font-size: 13px; margin-bottom: 12px; }
   .success { background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 16px; text-align: center; }
   .success p { color: #166534; font-size: 14px; margin-bottom: 12px; }
-  .btn-download { display: inline-block; background: #16A34A; color: #fff; border: none; border-radius: 10px; padding: 12px 28px; font-size: 15px; font-weight: 700; cursor: pointer; text-decoration: none; }
+  .btn-download { display: inline-block; background: #16A34A; color: #fff; border: none; border-radius: 10px; padding: 12px 28px; font-size: 15px; font-weight: 700; cursor: pointer; }
   .btn-download:hover { background: #15803D; }
-  .products-list { margin-top: 16px; }
   .product-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid #FED7AA; font-size: 13px; }
   .product-row:last-child { border-bottom: none; }
   .product-code { font-weight: 700; color: #1C1917; min-width: 60px; }
@@ -63,13 +62,11 @@
         <div class="drop-hint">Clique ou arraste aqui</div>
       </div>
     </div>
-
     <div class="markup-row">
       <label>Markup %</label>
       <input type="number" id="markup" value="35" min="0" max="200"/>
       <span id="multiplier-label">Preço final = custo × 1.350</span>
     </div>
-
     <div id="error-box" class="error" style="display:none"></div>
     <button class="btn" id="btn-gerar" onclick="gerar()" disabled>🚀 Gerar Catálogo com IA</button>
   </div>
@@ -80,8 +77,8 @@
       <button class="btn-download" onclick="baixarPDF()">⬇️ Baixar PDF com Preços</button>
     </div>
     <div class="card" style="margin-top:16px">
-      <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:#1C1917" id="brand-name"></div>
-      <div class="products-list" id="products-list"></div>
+      <div style="font-weight:700;font-size:14px;margin-bottom:12px" id="brand-name"></div>
+      <div id="products-list"></div>
     </div>
   </div>
 </div>
@@ -105,7 +102,7 @@
 
   document.getElementById('markup').addEventListener('input', function() {
     const v = parseFloat(this.value) || 0;
-    document.getElementById('multiplier-label').textContent = `Preço final = custo × ${(1 + v/100).toFixed(3)}`;
+    document.getElementById('multiplier-label').textContent = 'Preço final = custo × ' + (1 + v/100).toFixed(3);
   });
 
   async function gerar() {
@@ -115,260 +112,49 @@
     btn.disabled = true;
     btn.textContent = '⏳ Processando com IA...';
     document.getElementById('results').style.display = 'none';
-
     try {
       const markup = document.getElementById('markup').value;
       const fd = new FormData();
       fd.append('catalog', files.catalog);
       fd.append('price', files.price);
       fd.append('markup', markup);
-
       const res = await fetch('/api/generate', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
-
       lastData = data;
       renderResults(data);
     } catch(e) {
       errBox.textContent = '❌ ' + e.message;
       errBox.style.display = 'block';
     }
-
     btn.disabled = false;
     btn.textContent = '🚀 Gerar Catálogo com IA';
   }
 
   function renderResults(data) {
     document.getElementById('brand-name').textContent = (data.brand || 'Catálogo') + ' — ' + data.products.length + ' produtos · Markup ' + data.markup + '%';
-    document.getElementById('success-msg').textContent = `✅ PDF gerado com sucesso! ${data.products.length} produtos com preços inseridos.`;
-
+    document.getElementById('success-msg').textContent = '✅ PDF gerado! ' + data.products.length + ' produtos com preços inseridos.';
     const list = document.getElementById('products-list');
     list.innerHTML = '';
     data.products.forEach(p => {
       const prices = Object.entries(p.prices || {}).map(([sz, val]) =>
-        `<span class="price-tag"><span style="color:#78716C">${sz}:</span> <b>${val}</b></span>`
+        '<span class="price-tag"><span style="color:#78716C">' + sz + ':</span> <b>' + val + '</b></span>'
       ).join('');
-      list.innerHTML += `
-        <div class="product-row">
-          <span class="product-code">${p.code}</span>
-          <div class="product-prices">${prices || '<span style="color:#78716C;font-size:11px">Sem preço na tabela</span>'}</div>
-          <span class="page-badge">pág. ${p.page || '?'}</span>
-        </div>`;
+      list.innerHTML += '<div class="product-row"><span class="product-code">' + p.code + '</span><div class="product-prices">' + (prices || '<span style="color:#78716C;font-size:11px">Sem preço</span>') + '</div><span class="page-badge">pág. ' + (p.page || '?') + '</span></div>';
     });
     document.getElementById('results').style.display = 'block';
   }
 
   function baixarPDF() {
-    if (!lastData?.pdfBase64) return;
+    if (!lastData || !lastData.pdfBase64) return;
     const bytes = Uint8Array.from(atob(lastData.pdfBase64), c => c.charCodeAt(0));
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `catalogo-${(lastData.brand || 'brinca-comigo').replace(/\s/g,'-')}-markup${lastData.markup}.pdf`;
+    a.download = 'catalogo-' + (lastData.brand || 'brinca-comigo').replace(/\s/g,'-') + '-markup' + lastData.markup + '.pdf';
     a.click();
     URL.revokeObjectURL(url);
-  }
-</script>
-</body>
-</html>
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Brinca Comigo — Gerador de Catálogo</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: sans-serif; background: #FAFAF9; color: #1C1917; padding: 24px 16px; }
-  .container { max-width: 720px; margin: 0 auto; }
-  h1 { color: #F97316; font-size: 22px; text-align: center; margin-bottom: 4px; }
-  .sub { text-align: center; color: #78716C; font-size: 13px; margin-bottom: 24px; }
-  .card { background: #fff; border: 1px solid #FED7AA; border-radius: 14px; padding: 24px; margin-bottom: 20px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
-  .drop { border: 2px dashed #FED7AA; border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; background: #fff; transition: all .2s; }
-  .drop:hover { border-color: #F97316; background: #FFF7ED; }
-  .drop input { display: none; }
-  .drop-icon { font-size: 24px; margin-bottom: 6px; }
-  .drop-label { font-size: 13px; font-weight: 600; color: #1C1917; }
-  .drop-hint { font-size: 11px; color: #78716C; }
-  .drop.has-file { border-color: #F97316; background: #FFF7ED; }
-  .drop.has-file .drop-label { color: #F97316; }
-  .markup-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-  .markup-row label { font-size: 13px; font-weight: 600; }
-  .markup-row input { width: 80px; padding: 8px 12px; border: 1.5px solid #FED7AA; border-radius: 8px; font-size: 15px; font-weight: 700; color: #F97316; text-align: center; outline: none; }
-  .markup-row span { font-size: 12px; color: #78716C; }
-  .btn { width: 100%; padding: 13px; background: #F97316; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; transition: background .2s; }
-  .btn:disabled { background: #D6D3D1; cursor: not-allowed; }
-  .btn:hover:not(:disabled) { background: #EA6C0A; }
-  .error { background: #FEF2F2; border: 1px solid #FECACA; border-radius: 8px; padding: 10px 14px; color: #DC2626; font-size: 13px; margin-bottom: 12px; }
-  .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-  .results-title { font-size: 15px; font-weight: 700; }
-  .results-sub { font-size: 12px; color: #78716C; }
-  .btn-export { background: #F97316; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
-  .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
-  .product-card { border: 1px solid #FED7AA; border-radius: 10px; overflow: hidden; background: #fff; }
-  .product-img { width: 100%; height: 140px; object-fit: cover; }
-  .product-no-img { width: 100%; height: 140px; background: #FFF7ED; display: flex; align-items: center; justify-content: center; color: #78716C; font-size: 11px; }
-  .product-info { padding: 8px 10px; }
-  .product-code { font-weight: 700; font-size: 11px; margin-bottom: 2px; }
-  .product-name { color: #78716C; font-size: 11px; margin-bottom: 6px; }
-  .prices { display: flex; flex-wrap: wrap; gap: 4px; }
-  .price-tag { background: #FFF7ED; border: 1px solid #FED7AA; border-radius: 6px; padding: 2px 7px; font-size: 11px; }
-  .price-tag b { color: #F97316; }
-  .status { text-align: center; color: #78716C; font-size: 13px; padding: 12px 0; }
-</style>
-</head>
-<body>
-<div class="container">
-  <div style="text-align:center;margin-bottom:8px;font-size:32px">🧸</div>
-  <h1>Brinca Comigo</h1>
-  <p class="sub">Gerador de Catálogo com Markup</p>
-
-  <div class="card">
-    <div class="grid">
-      <div class="drop" id="drop-catalog" onclick="document.getElementById('input-catalog').click()">
-        <input type="file" id="input-catalog" accept=".pdf,image/*" onchange="setFile('catalog',this)"/>
-        <div class="drop-icon">📚</div>
-        <div class="drop-label" id="label-catalog">Catálogo (PDF)</div>
-        <div class="drop-hint">Clique ou arraste aqui</div>
-      </div>
-      <div class="drop" id="drop-price" onclick="document.getElementById('input-price').click()">
-        <input type="file" id="input-price" accept=".pdf,image/*" onchange="setFile('price',this)"/>
-        <div class="drop-icon">💰</div>
-        <div class="drop-label" id="label-price">Tabela de Preços (PDF/Foto)</div>
-        <div class="drop-hint">Clique ou arraste aqui</div>
-      </div>
-    </div>
-
-    <div class="markup-row">
-      <label>Markup %</label>
-      <input type="number" id="markup" value="35" min="0" max="200"/>
-      <span id="multiplier-label">Preço final = custo × 1.350</span>
-    </div>
-
-    <div id="error-box" class="error" style="display:none"></div>
-
-    <button class="btn" id="btn-gerar" onclick="gerar()" disabled>🚀 Gerar Catálogo com IA</button>
-  </div>
-
-  <div id="results" style="display:none">
-    <div class="results-header">
-      <div>
-        <div class="results-title" id="brand-name"></div>
-        <div class="results-sub" id="results-sub"></div>
-      </div>
-      <button class="btn-export" onclick="exportar()">📄 Exportar / Imprimir</button>
-    </div>
-    <div class="products-grid" id="products-grid"></div>
-  </div>
-</div>
-
-<script>
-  let files = { catalog: null, price: null };
-  let lastData = null;
-
-  function setFile(type, input) {
-    const f = input.files[0];
-    if (!f) return;
-    files[type] = f;
-    document.getElementById('drop-' + type).classList.add('has-file');
-    document.getElementById('label-' + type).textContent = f.name;
-    checkBtn();
-  }
-
-  function checkBtn() {
-    document.getElementById('btn-gerar').disabled = !(files.catalog && files.price);
-  }
-
-  document.getElementById('markup').addEventListener('input', function() {
-    const v = parseFloat(this.value) || 0;
-    document.getElementById('multiplier-label').textContent = `Preço final = custo × ${(1 + v/100).toFixed(3)}`;
-  });
-
-  async function gerar() {
-    const btn = document.getElementById('btn-gerar');
-    const errBox = document.getElementById('error-box');
-    errBox.style.display = 'none';
-    btn.disabled = true;
-    btn.textContent = '⏳ Processando com IA...';
-    document.getElementById('results').style.display = 'none';
-
-    try {
-      const markup = document.getElementById('markup').value;
-      const fd = new FormData();
-      fd.append('catalog', files.catalog);
-      fd.append('price', files.price);
-      fd.append('markup', markup);
-
-      const res = await fetch('/api/generate', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
-
-      lastData = data;
-      renderResults(data);
-    } catch(e) {
-      errBox.textContent = '❌ ' + e.message;
-      errBox.style.display = 'block';
-    }
-
-    btn.disabled = false;
-    btn.textContent = '🚀 Gerar Catálogo com IA';
-  }
-
-  function renderResults(data) {
-    document.getElementById('brand-name').textContent = data.brand || 'Catálogo';
-    document.getElementById('results-sub').textContent = `${data.products.length} produtos · Markup ${data.markup}%`;
-    const grid = document.getElementById('products-grid');
-    grid.innerHTML = '';
-    data.products.forEach(p => {
-      const prices = Object.entries(p.prices || {}).map(([t,v]) =>
-        `<span class="price-tag"><span style="color:#78716C">${t}:</span> <b>R$ ${v}</b></span>`
-      ).join('');
-      const img = p.imageBase64
-        ? `<img class="product-img" src="data:image/jpeg;base64,${p.imageBase64}" alt="${p.code}"/>`
-        : `<div class="product-no-img">📷 ${p.code}</div>`;
-      grid.innerHTML += `
-        <div class="product-card">
-          ${img}
-          <div class="product-info">
-            <div class="product-code">${p.code}</div>
-            <div class="product-name">${p.name}</div>
-            <div class="prices">${prices || '<span style="color:#78716C;font-size:11px">Sem preço</span>'}</div>
-          </div>
-        </div>`;
-    });
-    document.getElementById('results').style.display = 'block';
-  }
-
-  function exportar() {
-    if (!lastData) return;
-    const rows = lastData.products.map(p => {
-      const prices = Object.entries(p.prices || {}).map(([t,v]) =>
-        `<span style="background:#fff7ed;border:1px solid #fed7aa;border-radius:5px;padding:2px 7px;font-size:11px;margin:2px;display:inline-block"><b style="color:#78716c">${t}:</b> <b style="color:#f97316">R$ ${v}</b></span>`
-      ).join('');
-      const img = p.imageBase64
-        ? `<img src="data:image/jpeg;base64,${p.imageBase64}" style="width:100%;height:130px;object-fit:cover"/>`
-        : `<div style="width:100%;height:130px;background:#fff7ed;display:flex;align-items:center;justify-content:center;color:#78716c;font-size:11px">📷 ${p.code}</div>`;
-      return `<div style="border:1px solid #fed7aa;border-radius:10px;overflow:hidden;background:#fff;width:175px;display:inline-block;vertical-align:top;margin:8px;font-family:sans-serif">
-        ${img}
-        <div style="padding:8px 10px">
-          <div style="font-weight:700;font-size:11px">${p.code}</div>
-          <div style="color:#78716c;font-size:11px;margin-bottom:5px">${p.name}</div>
-          <div>${prices || '<span style="color:#78716c;font-size:11px">Sem preço</span>'}</div>
-        </div>
-      </div>`;
-    }).join('');
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Catálogo ${lastData.brand}</title></head>
-    <body style="font-family:sans-serif;background:#fafaf9;padding:20px">
-    <div style="text-align:center;margin-bottom:20px">
-      <h1 style="color:#f97316">${lastData.brand || 'Catálogo'}</h1>
-      <p style="color:#78716c">Markup: ${lastData.markup}% · ${lastData.products.length} produtos</p>
-    </div>
-    <div style="text-align:center">${rows}</div>
-    </body></html>`;
-    const w = window.open('', '_blank');
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => w.print(), 500);
   }
 </script>
 </body>
