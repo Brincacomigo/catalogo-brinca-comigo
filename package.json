@@ -1,0 +1,9 @@
+{
+  "name": "catalogo-brinca-comigo",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "formidable": "^3.5.1"
+  }
+}
