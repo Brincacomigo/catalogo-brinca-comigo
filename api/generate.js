@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import formidable from "formidable";
 import fs from "fs";
 
-export const config = { api: { bodyParser: false } };
+export const config = { api: { bodyParser: false, responseLimit: false, maxDuration: 60 } };
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
